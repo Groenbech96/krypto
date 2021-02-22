@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <span>
 
 #include "internal/util.h"
 
@@ -20,18 +21,44 @@ namespace krypto {
 	namespace pad {
 
 		namespace detail {
-			constexpr static std::array<unsigned char, 16> compute_zero_padding() noexcept {
-				std::array<unsigned char, 16> data{};
+			constexpr static std::array<unsigned char, 32> compute_zero_padding() noexcept
+			{
+				std::array<unsigned char, 32> data{};
 				return data;
 			}
+
+			static std::array<unsigned char, 32> compute_x_padding(int x) noexcept
+			{
+				std::array<unsigned char, 32> data{};
+				std::fill(data.begin(), data.end(), x);
+				return data;
+			}
+
 		}
 
-		class zero {
+		class ansix923 {
 		public:
-			static void apply(byte_array::iterator it, uint8_t pad_size) noexcept;
+			template <typename It>
+			static void apply(It it, uint8_t pad_size) noexcept;
+
+			template <typename It>
+			static uint8_t calculate(It it) noexcept;
+
 		private:
-			static constexpr std::array<unsigned char, 16> padding = detail::compute_zero_padding();
+			static constexpr std::array<unsigned char, 32> padding = detail::compute_zero_padding();
 		};
+
+
+		class pkcs7 {
+		public:
+			template <typename It>
+			static void apply(It it, uint8_t pad_size) noexcept;
+
+			template <typename It>
+			static uint8_t calculate(It it) noexcept;
+		};
+
+
 
 	}
 
@@ -57,6 +84,7 @@ namespace krypto {
 	template <size_t size, typename mode, typename padding>
 	class aes {
 	private:
+		static_assert(size == 128 || size == 194 || size == 256, "Invalid key size");
 		constexpr static uint8_t NB = 4;
 		constexpr static uint8_t NK = size / 32;
 		constexpr static uint8_t NR = (NK)+6;
@@ -112,7 +140,6 @@ namespace krypto {
 
 	};
 
-
 	/// 
 	// Implementation
 	///
@@ -128,7 +155,11 @@ namespace krypto {
 	inline byte_array aes<size, mode, padding>::encrypt(const_byte_view<> data) noexcept
 	{
 		byte_array cipher{};
-		const auto pad_size = data.size() >= 16 ? data.size() % 16 : 16 - data.size();
+
+		// Add one block of padding always 
+		const uint8_t pad_size = (data.size() % 16 == 0 ? 0 : 16 - (data.size() % 16)) + 16;
+
+		//const auto pad_size = data.size() > 16 ? 16 - (data.size() % 16) : 16 - data.size();
 		cipher.resize(data.size() + pad_size);
 
 		// Copy data to cipher array
@@ -150,8 +181,10 @@ namespace krypto {
 
 		// Copy data to plain array
 		std::copy(data.begin(), data.end(), plain.begin());
-
 		mode::decrypt(this, plain);
+
+		const auto s = padding::calculate(plain.end() - 1);
+		plain.resize(data.size() - s);
 
 		return plain;
 	}
@@ -203,7 +236,7 @@ namespace krypto {
 		std::array<unsigned char, 4> temp{};
 		std::array<unsigned char, 4> rcon = { 0,0,0,0 };
 
-		auto i = NK;
+		size_t i = NK;
 		while (i < NB * (NR + 1)) {
 
 			auto key_it = expanded_key.begin() + (i * 4);
@@ -420,10 +453,59 @@ namespace krypto {
 	 * Padding schemes
 	 */
 
-	inline void pad::zero::apply(byte_array::iterator it, uint8_t pad_size) noexcept
+
+	template <typename It>
+	inline void pad::ansix923::apply(It it, uint8_t pad_size) noexcept
 	{
+		// Pad first N-1 bytes with 0
+		std::copy(padding.begin(), padding.begin() + (pad_size - 1), it);
+		// Last pad byte is N
+		auto last_pad = std::next(it, pad_size - 1);
+		*last_pad = pad_size;
+	}
+
+	template <typename It>
+	inline uint8_t pad::ansix923::calculate(It it) noexcept
+	{
+
+		const auto pad_size = *it;
+
+		// Make sure padding is valid
+		const auto to = std::prev(it, pad_size - 1);
+		it--;
+		for (; it != to; it--) {
+			if (*it != 0)
+				return 0;
+		}
+
+		return pad_size;
+	}
+
+	template <typename It>
+	inline void pad::pkcs7::apply(It it, uint8_t pad_size) noexcept
+	{
+		const auto padding = detail::compute_x_padding(pad_size);
+
+		// Pad first N bytes with pad_size
 		std::copy(padding.begin(), padding.begin() + pad_size, it);
 	}
+
+	template <typename It>
+	inline uint8_t pad::pkcs7::calculate(It it) noexcept
+	{
+		const auto pad_size = *it;
+
+		// Make sure padding is valid
+		const auto to = std::prev(it, pad_size - 1);
+		it--;
+		for (; it != to; it--) {
+			if (*it != pad_size)
+				return 0;
+		}
+
+		return pad_size;
+	}
+
 
 	/**
 	 * Modes of operations
@@ -434,7 +516,7 @@ namespace krypto {
 	{
 		assert(data.size() % 16 == 0 && data.size() >= 16);
 		// Todo: Run in parallel 
-		for (int i = 0; i < data.size() / 16; i++) {
+		for (size_t i = 0; i < data.size() / 16; i++) {
 			instance->do_encrypt(data.subspan(i * 16).first<16>());
 		}
 	}
@@ -444,7 +526,7 @@ namespace krypto {
 	{
 		assert(data.size() % 16 == 0 && data.size() >= 16);
 		// Todo: Run in parallel 
-		for (int i = 0; i < data.size() / 16; i++) {
+		for (size_t i = 0; i < data.size() / 16; i++) {
 			instance->do_decrypt(data.subspan(i * 16).first<16>());
 		}
 	}

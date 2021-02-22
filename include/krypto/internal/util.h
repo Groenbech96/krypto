@@ -117,7 +117,7 @@ namespace krypto::util {
 
 		// SBox
 		for (size_t i = 1; i < tables.sbox.size(); i++) {
-			auto inv = fast_inv(i);
+			auto inv = fast_inv(static_cast<uint8_t>(i));
 			tables.sbox[i] = inv ^ rotl8(inv, 1) ^ rotl8(inv, 2) ^ rotl8(inv, 3) ^ rotl8(inv, 4) ^ 0x63;
 		}
 
