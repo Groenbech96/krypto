@@ -4,6 +4,7 @@ set( CMAKE_CXX_STANDARD_REQUIRED ON )
 
 project( krypto_tests DESCRIPTION "krypto tests" LANGUAGES CXX )
 
+find_package(OpenMP REQUIRED)
 
 # Prevent overriding the parent project's compiler/linker
 # settings on Windows
@@ -16,5 +17,5 @@ add_executable(krypto_tests
     "test_aes.cpp"
 )
 
-target_link_libraries( krypto_tests PRIVATE krypto::krypto gtest gmock gtest_main )
+target_link_libraries( krypto_tests PRIVATE krypto::krypto gtest gmock gtest_main OpenMP::OpenMP_CXX )
 

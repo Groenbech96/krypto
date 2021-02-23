@@ -3,6 +3,12 @@
 #include <cstdint>
 #include <array>
 
+#ifdef WIN32
+#include <immintrin.h>
+#endif
+
+
+
 namespace krypto::util {
 
 	/**
@@ -152,7 +158,63 @@ namespace krypto::util {
 	}
 
 
-	
+
+	/**
+	 * Compute secure random number.
+	 * https://en.wikipedia.org/wiki/RDRAND
+	 */
+	inline uint64_t get_secure_random() noexcept {
+#ifdef WIN32
+
+		int ready = 0;
+		uint64_t val;
+		while (!ready) {
+			ready = _rdrand64_step(&val);
+		}
+		return val;
+
+#else 
+		uint64_t val;
+		unsigned char ready = 0;
+
+		while ((int)ready == 0) {
+			asm volatile ("rdrand %0; setc %1"
+				: "=r" (val), "=qm" (ready));
+		}
+
+		return val;
+#endif
+	}
+
+
+	template <size_t bytes>
+	std::array<unsigned char, bytes> create_iv() noexcept {
+		std::array<unsigned char, bytes> data;
+
+		const auto total = data.size() >> 3; // size / 8
+		for (int i = 0; i < total; i++) {
+			const uint64_t random = get_secure_random();
+			auto* pchar = reinterpret_cast<const char*>(&random);
+			std::memcpy(&data[(i * 8)], pchar, 8);
+		}
+		const auto rest = data.size() - (total << 3); // total * 8
+		if (rest) {
+			const uint64_t random = get_secure_random();
+			auto* pchar = reinterpret_cast<const char*>(&random);
+			std::memcpy(&data[(total << 3)], pchar, rest);
+		}
+		
+		return data;
+	}
+
+
+	constexpr void xor_block(std::span<unsigned char, 16> left, std::span<unsigned char, 16> right) noexcept {
+		for (int i = 0; i < 16; i++) {
+			left[i] ^= right[i];
+		}
+	}
+
 
 
 }
+

@@ -4,9 +4,9 @@
 #include <array>
 #include <vector>
 #include <span>
+#include <execution>
 
 #include "internal/util.h"
-
 
 namespace krypto {
 
@@ -42,7 +42,7 @@ namespace krypto {
 			static void apply(It it, uint8_t pad_size) noexcept;
 
 			template <typename It>
-			static uint8_t calculate(It it) noexcept;
+			static uint8_t detect(It it) noexcept;
 
 		private:
 			static constexpr std::array<unsigned char, 32> padding = detail::compute_zero_padding();
@@ -55,13 +55,12 @@ namespace krypto {
 			static void apply(It it, uint8_t pad_size) noexcept;
 
 			template <typename It>
-			static uint8_t calculate(It it) noexcept;
+			static uint8_t detect(It it) noexcept;
 		};
 
 
 
 	}
-
 
 
 	namespace modes {
@@ -71,12 +70,26 @@ namespace krypto {
 		public:
 
 			template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
-			static void encrypt(T<size, mode, pad>* instance, byte_view<> data) noexcept;
+			static void encrypt(T<size, mode, pad>* instance, byte_array& data) noexcept;
 
 			template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
-			static void decrypt(T<size, mode, pad>* instance, byte_view<> data) noexcept;
+			static void decrypt(T<size, mode, pad>* instance, byte_array& data) noexcept;
 
 		};
+
+		class cbc {
+		public:
+
+			template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
+			static void encrypt(T<size, mode, pad>* instance, byte_array& data) noexcept;
+
+			template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
+			static void decrypt(T<size, mode, pad>* instance, byte_array& data) noexcept;
+
+		};
+
+		
+
 
 
 	}
@@ -90,6 +103,7 @@ namespace krypto {
 		constexpr static uint8_t NR = (NK)+6;
 
 		friend class modes::ecb;
+		friend class modes::cbc;
 
 	public:
 		/**
@@ -154,39 +168,37 @@ namespace krypto {
 	template<size_t size, typename mode, typename padding>
 	inline byte_array aes<size, mode, padding>::encrypt(const_byte_view<> data) noexcept
 	{
-		byte_array cipher{};
+		byte_array cipher_text;
 
-		// Add one block of padding always 
+		// Add minimum 16 bytes of padding.
 		const uint8_t pad_size = (data.size() % 16 == 0 ? 0 : 16 - (data.size() % 16)) + 16;
+		
+		cipher_text.resize(data.size() + pad_size);
+		std::copy(data.begin(), data.end(), cipher_text.begin());
 
-		//const auto pad_size = data.size() > 16 ? 16 - (data.size() % 16) : 16 - data.size();
-		cipher.resize(data.size() + pad_size);
-
-		// Copy data to cipher array
-		std::copy(data.begin(), data.end(), cipher.begin());
-
-		// Add padding to end
+		// Add padding to end of plain_text
 		if (pad_size > 0)
-			padding::apply(cipher.begin() + data.size(), pad_size);
-		mode::encrypt(this, cipher);
+			padding::apply(cipher_text.begin() + data.size(), pad_size);
+		
+		mode::encrypt(this, cipher_text);
 
-		return cipher;
+		return cipher_text;
 	}
 
 	template<size_t size, typename mode, typename padding>
 	inline byte_array aes<size, mode, padding>::decrypt(const_byte_view<> data) noexcept
 	{
-		byte_array plain{};
-		plain.resize(data.size());
+		byte_array plain_text;
+		plain_text.resize(data.size());
 
 		// Copy data to plain array
-		std::copy(data.begin(), data.end(), plain.begin());
-		mode::decrypt(this, plain);
+		std::copy(data.begin(), data.end(), plain_text.begin());
+		mode::decrypt(this, plain_text);
 
-		const auto s = padding::calculate(plain.end() - 1);
-		plain.resize(data.size() - s);
-
-		return plain;
+		const auto s = padding::detect(plain_text.end() - 1);
+		plain_text.resize(plain_text.size() - s);
+		
+		return plain_text;
 	}
 
 	template<size_t size, typename mode, typename padding>
@@ -465,7 +477,7 @@ namespace krypto {
 	}
 
 	template <typename It>
-	inline uint8_t pad::ansix923::calculate(It it) noexcept
+	inline uint8_t pad::ansix923::detect(It it) noexcept
 	{
 
 		const auto pad_size = *it;
@@ -491,7 +503,7 @@ namespace krypto {
 	}
 
 	template <typename It>
-	inline uint8_t pad::pkcs7::calculate(It it) noexcept
+	inline uint8_t pad::pkcs7::detect(It it) noexcept
 	{
 		const auto pad_size = *it;
 
@@ -512,23 +524,82 @@ namespace krypto {
 	 */
 
 	template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
-	inline void modes::ecb::encrypt(T<size, mode, pad>* instance, byte_view<> data) noexcept
+	inline void modes::ecb::encrypt(T<size, mode, pad>* instance, byte_array& data) noexcept
 	{
-		assert(data.size() % 16 == 0 && data.size() >= 16);
-		// Todo: Run in parallel 
-		for (size_t i = 0; i < data.size() / 16; i++) {
-			instance->do_encrypt(data.subspan(i * 16).first<16>());
+		assert(data.size() % 16 == 0 && data.size() >= 32);
+		std::span<unsigned char> data_view(data);
+
+		#pragma omp parallel for
+		for (int i = 0; i < data_view.size() / 16; i++) {
+			instance->do_encrypt(data_view.subspan(i * 16).first<16>());
 		}
+			
 	}
 
 	template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
-	inline void modes::ecb::decrypt(T<size, mode, pad>* instance, byte_view<> data) noexcept
+	inline void modes::ecb::decrypt(T<size, mode, pad>* instance, byte_array& data) noexcept
 	{
-		assert(data.size() % 16 == 0 && data.size() >= 16);
-		// Todo: Run in parallel 
-		for (size_t i = 0; i < data.size() / 16; i++) {
-			instance->do_decrypt(data.subspan(i * 16).first<16>());
+		assert(data.size() % 16 == 0 && data.size() >= 32);
+		std::span<unsigned char> data_view(data);
+		
+		#pragma omp parallel for
+		for (int i = 0; i < data_view.size() / 16; i++) {
+			instance->do_decrypt(data_view.subspan(i * 16).first<16>());
 		}
+	}
+
+	
+
+	template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
+	inline void modes::cbc::encrypt(T<size, mode, pad>* instance, byte_array& data) noexcept
+	{
+		assert(data.size() % 16 == 0 && data.size() >= 32);
+		auto iv = krypto::util::create_iv<16>();
+
+		std::span<unsigned char> data_view(data);
+		std::span<unsigned char, 16> iv_view(iv);
+
+		for (size_t i = 0; i < data_view.size() / 16; i++) {
+			auto block = data_view.subspan(i * 16).first<16>();
+			krypto::util::xor_block(block, iv_view);
+			instance->do_encrypt(block);
+			iv_view = block;
+		}
+
+		data.resize(data.size() + iv.size());
+		std::copy(iv.begin(), iv.end(), data.begin() + data.size() - iv.size());
+
+	}
+
+	template<template<size_t, typename, typename> typename T, size_t size, typename mode, typename pad>
+	inline void modes::cbc::decrypt(T<size, mode, pad>* instance, byte_array& data) noexcept
+	{
+		assert(data.size() % 16 == 0 && data.size() >= 32);
+
+		// Last bytes are IV
+		std::span<unsigned char> data_view(data);
+		std::array<unsigned char, 16> iv;
+		std::array<unsigned char, 16> prev_iv;
+
+		std::copy(data.begin() + (data_view.size() - 16), data.end(), prev_iv.begin());
+		
+		for (size_t i = 0; i < (data_view.size() / 16) - 1; i++) {
+			
+			// Current cipher text
+			auto block = data_view.subspan(i * 16).first<16>();
+
+			// Save iv from current cipher
+			std::copy(block.begin(), block.end(), iv.begin());
+			
+			instance->do_decrypt(block);
+			
+			krypto::util::xor_block(block, prev_iv);
+			std::copy(iv.begin(), iv.end(), prev_iv.begin());
+		
+		}
+			
+		data.resize(data.size() - 16);
+		
 	}
 
 

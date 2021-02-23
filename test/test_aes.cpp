@@ -47,7 +47,7 @@ TEST_F(AesTest, Padding_ANSIX923) {
 		ASSERT_EQ(data[i], 0);
 	}
 
-	ASSERT_EQ(krypto::pad::ansix923::calculate(data.end() - 1), 10);
+	ASSERT_EQ(krypto::pad::ansix923::detect(data.end() - 1), 10);
 
 }
 
@@ -65,10 +65,9 @@ TEST_F(AesTest, Padding_PKCS7) {
 		ASSERT_EQ(data[i], size);
 	}
 
-	ASSERT_EQ(krypto::pad::pkcs7::calculate(data.end() - 1), 10);
+	ASSERT_EQ(krypto::pad::pkcs7::detect(data.end() - 1), 10);
 
 }
-
 
 TEST_F(AesTest, EncryptDecrypt_ECB_128_16BIT_NOPADDING) {
 
@@ -76,6 +75,21 @@ TEST_F(AesTest, EncryptDecrypt_ECB_128_16BIT_NOPADDING) {
 	auto out = aes.encrypt(plain_text);
 	
 	krypto::aes<128, krypto::modes::ecb, krypto::pad::ansix923> aes2(key_128);
+	auto out2 = aes2.decrypt(out);
+
+	ASSERT_EQ(out2.size(), plain_text.size());
+	for (int i = 0; i < out2.size(); i++) {
+		ASSERT_EQ(out2[i], plain_text[i]);
+	}
+
+}
+
+TEST_F(AesTest, EncryptDecrypt_CBC_128_16BIT_NOPADDING) {
+
+	krypto::aes<128, krypto::modes::cbc, krypto::pad::ansix923> aes(key_128);
+	auto out = aes.encrypt(plain_text);
+
+	krypto::aes<128, krypto::modes::cbc, krypto::pad::ansix923> aes2(key_128);
 	auto out2 = aes2.decrypt(out);
 
 	ASSERT_EQ(out2.size(), plain_text.size());
@@ -100,6 +114,22 @@ TEST_F(AesTest, EncryptDecrypt_ECB_194_16BIT_NOPADDING) {
 
 }
 
+TEST_F(AesTest, EncryptDecrypt_CBC_194_16BIT_NOPADDING) {
+
+	krypto::aes<194, krypto::modes::cbc, krypto::pad::ansix923> aes(key_194);
+	auto out = aes.encrypt(plain_text);
+
+	krypto::aes<194, krypto::modes::cbc, krypto::pad::ansix923> aes2(key_194);
+	auto out2 = aes2.decrypt(out);
+
+	ASSERT_EQ(out2.size(), plain_text.size());
+	for (int i = 0; i < out2.size(); i++) {
+		ASSERT_EQ(out2[i], plain_text[i]);
+	}
+
+}
+
+
 TEST_F(AesTest, EncryptDecrypt_ECB_256_16BIT_NOPADDING) {
 
 	krypto::aes<256, krypto::modes::ecb, krypto::pad::ansix923> aes(key_256);
@@ -115,6 +145,22 @@ TEST_F(AesTest, EncryptDecrypt_ECB_256_16BIT_NOPADDING) {
 
 }
 
+TEST_F(AesTest, EncryptDecrypt_CBC_256_16BIT_NOPADDING) {
+
+	krypto::aes<256, krypto::modes::cbc, krypto::pad::ansix923> aes(key_256);
+	auto out = aes.encrypt(plain_text);
+
+	krypto::aes<256, krypto::modes::cbc, krypto::pad::ansix923> aes2(key_256);
+	auto out2 = aes2.decrypt(out);
+
+	ASSERT_EQ(out2.size(), plain_text.size());
+	for (int i = 0; i < out2.size(); i++) {
+		ASSERT_EQ(out2[i], plain_text[i]);
+	}
+
+}
+
+
 TEST_F(AesTest, EncryptDecrypt_ECB_ALL_1_to_256_BIT) {
 
 	krypto::aes<128, krypto::modes::ecb, krypto::pad::ansix923> aes_128(key_128);
@@ -122,7 +168,55 @@ TEST_F(AesTest, EncryptDecrypt_ECB_ALL_1_to_256_BIT) {
 	krypto::aes<256, krypto::modes::ecb, krypto::pad::ansix923> aes_256(key_256);
 	
 
-	for (int i = 1; i <= 1000; i++) {
+	for (int i = 1; i <= 10000; i++) {
+
+		std::vector<unsigned char> data;
+		for (int j = 0; j < i; j++) {
+			data.push_back(rand() % 256);
+		}
+
+		{
+			auto out = aes_128.encrypt(data);
+			auto res = aes_128.decrypt(out);
+
+			ASSERT_EQ(res.size(), data.size());
+			for (int k = 0; k < res.size(); k++) {
+				ASSERT_EQ(res[k], data[k]);
+			}
+		}
+
+		{
+			auto out = aes_194.encrypt(data);
+			auto res = aes_194.decrypt(out);
+
+			ASSERT_EQ(res.size(), data.size());
+			for (int k = 0; k < res.size(); k++) {
+				ASSERT_EQ(res[k], data[k]);
+			}
+		}
+
+		{
+			auto out = aes_256.encrypt(data);
+			auto res = aes_256.decrypt(out);
+			
+			ASSERT_EQ(res.size(), data.size());
+			for (int k = 0; k < res.size(); k++) {
+				ASSERT_EQ(res[k], data[k]);
+			}
+		}
+
+	}
+
+}
+
+TEST_F(AesTest, EncryptDecrypt_CBC_ALL_1_to_256_BIT) {
+
+	krypto::aes<128, krypto::modes::cbc, krypto::pad::ansix923> aes_128(key_128);
+	krypto::aes<194, krypto::modes::cbc, krypto::pad::ansix923> aes_194(key_194);
+	krypto::aes<256, krypto::modes::cbc, krypto::pad::ansix923> aes_256(key_256);
+
+
+	for (int i = 1; i <= 10000; i++) {
 
 		std::vector<unsigned char> data;
 		for (int j = 0; j < i; j++) {

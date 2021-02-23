@@ -8,7 +8,7 @@ Cryptography algorithms written in C++20
 
 ## AES
 * Padding: ANSI X9.23, PKCS#7
-* Modes: ECB
+* Modes: ECB, CBC
 
 #### Implementation notes
 
