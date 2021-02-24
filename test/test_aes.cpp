@@ -70,6 +70,7 @@ TEST_F(AesTest, Padding_PKCS7) {
 }
 
 TEST_F(AesTest, EncryptDecrypt_ECB_128_16BIT_NOPADDING) {
+	
 
 	krypto::aes<128, krypto::modes::ecb, krypto::pad::ansix923> aes(key_128);
 	auto out = aes.encrypt(plain_text);

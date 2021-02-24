@@ -26,7 +26,7 @@ if ( krypto_BUILD_TESTS )
     add_subdirectory( test )
 endif ( krypto_BUILD_TESTS )
 
-#if ( krypto_BUILD_BENCHMARK )
-#    add_subdirectory( bench )
-#endif ( RADLIB_BUILD_BENCHMARK )
+if ( krypto_BUILD_BENCHMARK )
+    add_subdirectory( bench )
+endif ( krypto_BUILD_BENCHMARK )
 

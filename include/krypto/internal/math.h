@@ -2,17 +2,13 @@
 
 #include <cstdint>
 #include <array>
-
-#ifdef WIN32
-#include <immintrin.h>
-#endif
+#include <span>
 
 
-
-namespace krypto::util {
+namespace krypto::math {
 
 	/**
-	 * Log and Anti log lookup tables
+	 * AES Log and Anti log lookup tables
 	 * Anti log table is large enough to contain the sum of 255+255
 	 */
 	struct aes_log_tables {
@@ -35,13 +31,13 @@ namespace krypto::util {
 
 
 	// Adding in GF(2^8) is implemented using XOR
-	constexpr uint8_t add(uint8_t x, uint8_t y) {
+	constexpr uint8_t add256(uint8_t x, uint8_t y) {
 		return x ^ y;
 	}
 
 	// Multiplication in GF(2^8) by Russian Peasant Multiplication algorithm
 	// https://en.wikipedia.org/wiki/Finite_field_arithmetic
-	constexpr uint8_t mult(uint8_t x, uint8_t y) {
+	constexpr uint8_t mult256(uint8_t x, uint8_t y) {
 
 		uint8_t res = 0;
 		while (x && y) {
@@ -63,7 +59,7 @@ namespace krypto::util {
 
 	// Compute log tables
 	// From https://crypto.stackexchange.com/questions/12956/multiplicative-inverse-in-operatornamegf28/40140#40140
-	constexpr aes_log_tables compute_log_tables() {
+	constexpr aes_log_tables compute_aes_log_tables() {
 		aes_log_tables t{};
 		constexpr auto generator = 3;
 
@@ -75,11 +71,11 @@ namespace krypto::util {
 			t.log[x] = i;	// Get exponent from number
 			t.anti_log[i] = x; // Get number from exponent 
 
-			x = mult(x, generator); // g^1, g^2, g^3 
+			x = mult256(x, generator); // g^1, g^2, g^3 
 		}
 		for (int i = 255; i < 510; i++) {
 			t.anti_log[i] = x; // Get number from exponent 
-			x = mult(x, generator); // g^1, g^2, g^3 
+			x = mult256(x, generator); // g^1, g^2, g^3 
 		}
 
 		return t;
@@ -87,24 +83,31 @@ namespace krypto::util {
 
 	// Log and anti log tables
 	// Used to do fast mult and inverse calculations
-	inline constexpr aes_log_tables LOG_TABLES = compute_log_tables();
+	inline constexpr aes_log_tables LOG_TABLES = compute_aes_log_tables();
 	
-	constexpr uint8_t fast_mult(uint8_t a, uint8_t b) {
+	/**
+	 * Compute multiplication in GF(2^8) using lookup tables
+	 */
+	constexpr uint8_t fast_mult256(uint8_t a, uint8_t b) {
 		if (a == 0 || b == 0) return 0;
 
-		auto x = LOG_TABLES.log[a];
-		auto y = LOG_TABLES.log[b];
-		auto log_mult = (x + y); // Anti log table is 510 elements to support the overflow when adding two
+		const auto x = LOG_TABLES.log[a];
+		const auto y = LOG_TABLES.log[b];
+		// Anti log table is 510 elements to support the overflow when adding two
+		const auto log_mult = (x + y); 
 
 		return LOG_TABLES.anti_log[log_mult];
 	}
 
-	constexpr uint8_t fast_inv(uint8_t a) {
+	/**
+	 * Compute inverse in GF(2^8)
+	 */
+	constexpr uint8_t fast_inv256(uint8_t a) {
 
 		if (a == 0) return 0;
 
-		auto x = LOG_TABLES.log[a];
-		auto inv = 255 - x;
+		const auto x = LOG_TABLES.log[a];
+		const auto inv = 255 - x;
 
 		return LOG_TABLES.anti_log[inv];
 	}
@@ -117,13 +120,13 @@ namespace krypto::util {
 
 	// Compute SBox anmd InvSBox for AES 
 	// https://en.wikipedia.org/wiki/Rijndael_S-box
-	constexpr aes_sub_tables compute_sub_tables() {
+	constexpr aes_sub_tables compute_aes_sub_tables() {
 
 		aes_sub_tables tables{};
 
 		// SBox
 		for (size_t i = 1; i < tables.sbox.size(); i++) {
-			auto inv = fast_inv(static_cast<uint8_t>(i));
+			auto inv = fast_inv256(static_cast<uint8_t>(i));
 			tables.sbox[i] = inv ^ rotl8(inv, 1) ^ rotl8(inv, 2) ^ rotl8(inv, 3) ^ rotl8(inv, 4) ^ 0x63;
 		}
 
@@ -132,7 +135,7 @@ namespace krypto::util {
 		// Inv Sbox
 		for (int i = 0; i < tables.inv_sbox.size(); i++) {
 			auto b = rotl8(i, 1) ^ rotl8(i, 3) ^ rotl8(i, 6) ^ 5;
-			tables.inv_sbox[i] = fast_inv(b);
+			tables.inv_sbox[i] = fast_inv256(b);
 		}
 
 		return tables;
@@ -142,7 +145,7 @@ namespace krypto::util {
 	 * Compute round constants for AES 
 	 * https://en.wikipedia.org/wiki/AES_key_schedule
 	 */
-	constexpr aes_rcon compute_rcon() {
+	constexpr aes_rcon compute_aes_rcon() {
 
 		aes_rcon values{};
 
@@ -150,7 +153,7 @@ namespace krypto::util {
 		values[0] = 1;
 
 		for (size_t i = 1; i < values.size(); i++) {
-			val = fast_mult(val, 2);
+			val = fast_mult256(val, 2);
 			values[i] = val;
 		}
 
@@ -158,61 +161,53 @@ namespace krypto::util {
 	}
 
 
-
-	/**
-	 * Compute secure random number.
-	 * https://en.wikipedia.org/wiki/RDRAND
-	 */
-	inline uint64_t get_secure_random() noexcept {
-#ifdef WIN32
-
-		int ready = 0;
-		uint64_t val;
-		while (!ready) {
-			ready = _rdrand64_step(&val);
-		}
-		return val;
-
-#else 
-		uint64_t val;
-		unsigned char ready = 0;
-
-		while ((int)ready == 0) {
-			asm volatile ("rdrand %0; setc %1"
-				: "=r" (val), "=qm" (ready));
-		}
-
-		return val;
-#endif
-	}
-
-
-	template <size_t bytes>
-	std::array<unsigned char, bytes> create_iv() noexcept {
-		std::array<unsigned char, bytes> data;
-
-		const auto total = data.size() >> 3; // size / 8
-		for (int i = 0; i < total; i++) {
-			const uint64_t random = get_secure_random();
-			auto* pchar = reinterpret_cast<const char*>(&random);
-			std::memcpy(&data[(i * 8)], pchar, 8);
-		}
-		const auto rest = data.size() - (total << 3); // total * 8
-		if (rest) {
-			const uint64_t random = get_secure_random();
-			auto* pchar = reinterpret_cast<const char*>(&random);
-			std::memcpy(&data[(total << 3)], pchar, rest);
-		}
-		
-		return data;
-	}
-
-
-	constexpr void xor_block(std::span<unsigned char, 16> left, std::span<unsigned char, 16> right) noexcept {
-		for (int i = 0; i < 16; i++) {
+	constexpr void xor_block(std::span<unsigned char> left, 
+							 std::span<unsigned char> right) noexcept {
+		for (int i = 0; i < left.size(); i++) {
 			left[i] ^= right[i];
 		}
 	}
+
+	constexpr void xor_word(std::span<unsigned char, 4> data, 
+							std::span<unsigned char, 4> right) noexcept
+	{
+		// Todo can we do this in one line? XOR 32 bit value
+		data[0] ^= right[0];
+		data[1] ^= right[1];
+		data[2] ^= right[2];
+		data[3] ^= right[3];
+	}
+
+	constexpr void rot_word(std::span<unsigned char, 4> data) noexcept
+	{
+		// Todo: Can we do this in one line? Shift 32 byte integer?
+		const auto temp = data[0];
+		data[0] = data[1];
+		data[1] = data[2];
+		data[2] = data[3];
+		data[3] = temp;
+	}
+
+	
+	template <size_t S>
+	constexpr void sub_bytes(std::span<unsigned char, S> data, std::span<const unsigned char> sbox) noexcept
+	{
+		for (size_t i = 0; i < S; i++) {
+			data[i] = sbox[data[i]];
+		}
+	}
+
+	template <size_t S>
+	constexpr void inv_sub_bytes(std::span<unsigned char, S> data, std::span<const unsigned char> inv_sbox) noexcept
+	{
+		for (size_t i = 0; i < S; i++) {
+			data[i] = inv_sbox[data[i]];
+		}
+	}
+
+
+
+
 
 
 
