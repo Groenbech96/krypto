@@ -24,9 +24,11 @@ namespace krypto {
 		// Keep static tables for aes
 		struct aes_base {
 			constexpr static math::aes_sub_tables SUB_TABLES = math::compute_aes_sub_tables();
+			constexpr static math::aes_mult_tables MULT_TABLES = math::compute_aes_mult_tables();
 			constexpr static math::aes_rcon RCON = math::compute_aes_rcon();
 		};
 
+		// Implementation based on https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197.pdf
 		namespace aes {
 
 			template <typename It>
@@ -38,7 +40,10 @@ namespace krypto {
 			constexpr void inv_shift_rows_imp(byte_view<16> data) noexcept;
 
 			constexpr void mix_columns(byte_view<16> data) noexcept;
+			constexpr void mix_columns_imp(byte_view<16> data) noexcept;
+			constexpr void mix_columns_imp2(byte_view<16> data) noexcept;
 			constexpr void inv_mix_columns(byte_view<16> data) noexcept;
+			constexpr void inv_mix_columns_imp(byte_view<16> data) noexcept;
 
 			template <size_t Size>
 			constexpr void encrypt(byte_view<16> data, const_byte_view<Size> key) noexcept;
@@ -141,11 +146,11 @@ namespace krypto {
 				rcon_temp[0] = internal::aes_base::RCON[(i / NK) - 1];
 
 				math::rot_word(temp);
-				math::sub_bytes<4>(temp, internal::aes_base::SUB_TABLES.sbox); // sub_word(temp); 
+				math::sub_bytes<4>(temp, internal::aes_base::SUB_TABLES.sbox);
 				math::xor_word(temp, rcon_temp);
 			}
 			else if (NK > 6 && i % NK == 4) {
-				math::sub_bytes<4>(temp, internal::aes_base::SUB_TABLES.sbox); //sub_word(temp);
+				math::sub_bytes<4>(temp, internal::aes_base::SUB_TABLES.sbox); 
 			}
 
 			math::xor_word(temp, window);
@@ -289,7 +294,7 @@ namespace krypto {
 			for (int i = 1; i < NR; i++) {
 				math::sub_bytes(data, aes_base::SUB_TABLES.sbox);
 				shift_rows_imp(data);
-				mix_columns(data);
+				mix_columns_imp(data);
 				add_round_key(data, key.begin() + i * 16);
 			}
 
@@ -320,7 +325,6 @@ namespace krypto {
 
 		constexpr void inv_mix_columns(byte_view<16> data) noexcept
 		{
-			// Todo: Improve this function
 			std::array<uint8_t, 16> buf{};
 
 			// C1
@@ -348,6 +352,24 @@ namespace krypto {
 			buf[15] = math::fast_mult256(0x0b, data[12]) ^ math::fast_mult256(0x0d, data[13]) ^ math::fast_mult256(0x09, data[14]) ^ math::fast_mult256(0x0e, data[15]);
 
 			std::copy(buf.begin(), buf.end(), data.begin());
+		}
+
+		constexpr void inv_mix_columns_imp(byte_view<16> data) noexcept
+		{
+
+			uint8_t a, b, c, d;
+			for (size_t i = 0; i < 16; i = i + 4) {
+
+				a = aes_base::MULT_TABLES.mult_14[data[i]] ^ aes_base::MULT_TABLES.mult_11[data[i + 1]] ^ aes_base::MULT_TABLES.mult_13[data[i + 2]] ^ aes_base::MULT_TABLES.mult_9[data[i + 3]];
+				b = aes_base::MULT_TABLES.mult_9[data[i]] ^ aes_base::MULT_TABLES.mult_14[data[i + 1]] ^ aes_base::MULT_TABLES.mult_11[data[i + 2]] ^ aes_base::MULT_TABLES.mult_13[data[i + 3]];
+				c = aes_base::MULT_TABLES.mult_13[data[i]] ^ aes_base::MULT_TABLES.mult_9[data[i + 1]] ^ aes_base::MULT_TABLES.mult_14[data[i + 2]] ^ aes_base::MULT_TABLES.mult_11[data[i + 3]];
+				d = aes_base::MULT_TABLES.mult_11[data[i]] ^ aes_base::MULT_TABLES.mult_13[data[i + 1]] ^ aes_base::MULT_TABLES.mult_9[data[i + 2]] ^ aes_base::MULT_TABLES.mult_14[data[i + 3]];
+				
+				data[i] ^= a;
+				data[i + 1] ^= b;
+				data[i + 2] ^= c;
+				data[i + 3] ^= d;
+			}
 		}
 
 		constexpr void inv_shift_rows(byte_view<16> data) noexcept
@@ -409,6 +431,31 @@ namespace krypto {
 			data[11] = data[15];
 			data[15] = l;
 
+		}
+
+		constexpr void mix_columns_imp(byte_view<16> data) noexcept
+		{
+			for (size_t i = 0; i < 16; i = i + 4) {
+
+				uint8_t a = data[i];
+				uint8_t e = data[i] ^ data[i + 1] ^ data[i + 2] ^ data[i + 3];
+				data[i] ^= e ^ math::fast_mult256(2, a ^ data[i + 1]);
+				data[i+1] ^= e ^ math::fast_mult256(2, data[i+1] ^ data[i + 2]);
+				data[i+2] ^= e ^ math::fast_mult256(2, data[i+2] ^ data[i + 3]);
+				data[i+3] ^= e ^ math::fast_mult256(2, data[i + 3] ^ a );
+			}
+		}
+
+		constexpr void mix_columns_imp2(byte_view<16> data) noexcept
+		{
+			for (size_t i = 0; i < 16; i = i + 4) {
+				uint8_t a = data[i];
+				uint8_t e = data[i] ^ data[i + 1] ^ data[i + 2] ^ data[i + 3];
+				data[i] ^= e ^ aes_base::MULT_TABLES.mult_2[a ^ data[i + 1]]; //math::fast_mult256(2, a ^ data[i + 1]);
+				data[i + 1] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 1] ^ data[i + 2]]; // math::fast_mult256(2, data[i + 1] ^ data[i + 2]);
+				data[i + 2] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 2] ^ data[i + 3]]; // math::fast_mult256(2, data[i + 2] ^ data[i + 3]);
+				data[i + 3] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 3] ^ a]; // math::fast_mult256(2, data[i + 3] ^ a);
+			}
 		}
 
 
