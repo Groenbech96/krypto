@@ -56,17 +56,6 @@ static void BM_SHIFTROWS(benchmark::State& state) {
 }
 BENCHMARK(BM_SHIFTROWS);
 
-
-static void BM_SHIFTROWS_IMPROVE(benchmark::State& state) {
-	std::array<unsigned char, 16> data;
-	data.fill(1);
-
-	for (auto _ : state)
-		krypto::internal::aes::shift_rows_imp(data);
-
-}
-BENCHMARK(BM_SHIFTROWS_IMPROVE);
-
 static void BM_SHIFTROWSINV(benchmark::State& state) {
 	std::array<unsigned char, 16> data;
 	data.fill(1);
@@ -77,16 +66,6 @@ static void BM_SHIFTROWSINV(benchmark::State& state) {
 }
 BENCHMARK(BM_SHIFTROWSINV);
 
-
-static void BM_SHIFTROWSINV_IMPROVE(benchmark::State& state) {
-	std::array<unsigned char, 16> data;
-	data.fill(1);
-
-	for (auto _ : state)
-		krypto::internal::aes::inv_shift_rows_imp(data);
-
-}
-BENCHMARK(BM_SHIFTROWSINV_IMPROVE);
 
 static void BM_MIXCOLUMN(benchmark::State& state) {
 	std::array<unsigned char, 16> data;
@@ -99,25 +78,16 @@ static void BM_MIXCOLUMN(benchmark::State& state) {
 BENCHMARK(BM_MIXCOLUMN);
 
 
-static void BM_MIXCOLUMN_IMPROVE(benchmark::State& state) {
+static void BM_MIXCOLUMN_SLOW(benchmark::State& state) {
 	std::array<unsigned char, 16> data;
 	data.fill(1);
 
 	for (auto _ : state)
-		krypto::internal::aes::mix_columns_imp(data);
+		krypto::internal::aes::mix_columns_slow(data);
 
 }
-BENCHMARK(BM_MIXCOLUMN_IMPROVE);
+BENCHMARK(BM_MIXCOLUMN_SLOW);
 
-static void BM_MIXCOLUMN_IMPROVE2(benchmark::State& state) {
-	std::array<unsigned char, 16> data;
-	data.fill(1);
-
-	for (auto _ : state)
-		krypto::internal::aes::mix_columns_imp2(data);
-
-}
-BENCHMARK(BM_MIXCOLUMN_IMPROVE2);
 
 static void BM_MIXCOLUMNINV(benchmark::State& state) {
 	std::array<unsigned char, 16> data;
@@ -130,15 +100,14 @@ static void BM_MIXCOLUMNINV(benchmark::State& state) {
 BENCHMARK(BM_MIXCOLUMNINV);
 
 
-static void BM_MIXCOLUMNINV_IMPROVE(benchmark::State& state) {
+static void BM_MIXCOLUMNINV_SLOW(benchmark::State& state) {
 	std::array<unsigned char, 16> data;
 	data.fill(1);
 
 	for (auto _ : state)
-		krypto::internal::aes::inv_mix_columns_imp(data);
+		krypto::internal::aes::inv_mix_columns_slow(data);
 
 }
-BENCHMARK(BM_MIXCOLUMNINV_IMPROVE);
-
+BENCHMARK(BM_MIXCOLUMNINV_SLOW);
 
 BENCHMARK_MAIN();

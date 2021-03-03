@@ -35,15 +35,13 @@ namespace krypto {
 			constexpr void add_round_key(byte_view<16> data, It key) noexcept;
 
 			constexpr void shift_rows(byte_view<16> data) noexcept;
-			constexpr void shift_rows_imp(byte_view<16> data) noexcept;
 			constexpr void inv_shift_rows(byte_view<16> data) noexcept;
-			constexpr void inv_shift_rows_imp(byte_view<16> data) noexcept;
 
 			constexpr void mix_columns(byte_view<16> data) noexcept;
-			constexpr void mix_columns_imp(byte_view<16> data) noexcept;
-			constexpr void mix_columns_imp2(byte_view<16> data) noexcept;
+			constexpr void mix_columns_slow(byte_view<16> data) noexcept;
+			
 			constexpr void inv_mix_columns(byte_view<16> data) noexcept;
-			constexpr void inv_mix_columns_imp(byte_view<16> data) noexcept;
+			constexpr void inv_mix_columns_slow(byte_view<16> data) noexcept;
 
 			template <size_t Size>
 			constexpr void encrypt(byte_view<16> data, const_byte_view<Size> key) noexcept;
@@ -80,6 +78,19 @@ namespace krypto {
 			static void decrypt(byte_array& data, const_byte_view<KeySize> key) noexcept;
 
 		};
+
+		class gcm {
+
+
+			template <size_t KeySize>
+			static void encrypt(byte_array& data, const_byte_view<KeySize> key) noexcept;
+
+			template <size_t KeySize>
+			static void decrypt(byte_array& data, const_byte_view<KeySize> key) noexcept;
+
+		};
+
+		
 
 	}
 
@@ -282,6 +293,21 @@ namespace krypto {
 
 	}
 
+	template <size_t KeySize>
+	inline void modes::gcm::decrypt(byte_array& data, const_byte_view<KeySize> key) noexcept
+	{
+		// Todo https://www.rfc-editor.org/rfc/pdfrfc/rfc8452.txt.pdf
+		// https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
+	}
+
+	template <size_t KeySize>
+	inline void modes::gcm::encrypt(byte_array& data, const_byte_view<KeySize> key) noexcept
+	{
+
+
+	}
+
+
 	namespace internal::aes {
 
 		template <size_t Size>
@@ -293,13 +319,13 @@ namespace krypto {
 
 			for (int i = 1; i < NR; i++) {
 				math::sub_bytes(data, aes_base::SUB_TABLES.sbox);
-				shift_rows_imp(data);
-				mix_columns_imp(data);
+				shift_rows(data);
+				mix_columns(data);
 				add_round_key(data, key.begin() + i * 16);
 			}
 
 			math::sub_bytes(data, aes_base::SUB_TABLES.sbox);
-			shift_rows_imp(data);
+			shift_rows(data);
 			add_round_key(data, key.begin() + NR * 16);
 		}
 
@@ -311,19 +337,19 @@ namespace krypto {
 			add_round_key(data, key.begin() + NR * 16);
 
 			for (int i = NR - 1; i > 0; i--) {
-				inv_shift_rows_imp(data);
+				inv_shift_rows(data);
 				math::sub_bytes(data, aes_base::SUB_TABLES.inv_sbox);
 				add_round_key(data, key.begin() + i * 16);
 				inv_mix_columns(data);
 			}
 
-			inv_shift_rows_imp(data);
+			inv_shift_rows(data);
 			math::sub_bytes(data, aes_base::SUB_TABLES.inv_sbox);
 			add_round_key(data, key.begin());
 
 		}
 
-		constexpr void inv_mix_columns(byte_view<16> data) noexcept
+		constexpr void inv_mix_columns_slow(byte_view<16> data) noexcept
 		{
 			std::array<uint8_t, 16> buf{};
 
@@ -354,7 +380,7 @@ namespace krypto {
 			std::copy(buf.begin(), buf.end(), data.begin());
 		}
 
-		constexpr void inv_mix_columns_imp(byte_view<16> data) noexcept
+		constexpr void inv_mix_columns(byte_view<16> data) noexcept
 		{
 
 			uint8_t a, b, c, d;
@@ -365,47 +391,14 @@ namespace krypto {
 				c = aes_base::MULT_TABLES.mult_13[data[i]] ^ aes_base::MULT_TABLES.mult_9[data[i + 1]] ^ aes_base::MULT_TABLES.mult_14[data[i + 2]] ^ aes_base::MULT_TABLES.mult_11[data[i + 3]];
 				d = aes_base::MULT_TABLES.mult_11[data[i]] ^ aes_base::MULT_TABLES.mult_13[data[i + 1]] ^ aes_base::MULT_TABLES.mult_9[data[i + 2]] ^ aes_base::MULT_TABLES.mult_14[data[i + 3]];
 				
-				data[i] ^= a;
-				data[i + 1] ^= b;
-				data[i + 2] ^= c;
-				data[i + 3] ^= d;
+				data[i] = a;
+				data[i + 1] = b;
+				data[i + 2] = c;
+				data[i + 3] = d;
 			}
 		}
 
 		constexpr void inv_shift_rows(byte_view<16> data) noexcept
-		{
-			// Todo: Improve this function 
-			std::array<uint8_t, 16> buf{};
-
-			// No shift
-			buf[0] = data[0];
-			buf[4] = data[4];
-			buf[8] = data[8];
-			buf[12] = data[12];
-
-			// cyclically shifts 1
-			buf[1] = data[13];
-			buf[5] = data[1];
-			buf[9] = data[5];
-			buf[13] = data[9];
-
-			// cyclically shifts 2
-			buf[2] = data[10];
-			buf[6] = data[14];
-			buf[10] = data[2];
-			buf[14] = data[6];
-
-			// cyclically shifts 3
-			buf[3] = data[7];
-			buf[7] = data[11];
-			buf[11] = data[15];
-			buf[15] = data[3];
-
-			std::copy(buf.begin(), buf.end(), data.begin());
-
-		}
-
-		constexpr void inv_shift_rows_imp(byte_view<16> data) noexcept
 		{
 			uint8_t i, j, k, l;
 
@@ -433,33 +426,20 @@ namespace krypto {
 
 		}
 
-		constexpr void mix_columns_imp(byte_view<16> data) noexcept
-		{
-			for (size_t i = 0; i < 16; i = i + 4) {
-
-				uint8_t a = data[i];
-				uint8_t e = data[i] ^ data[i + 1] ^ data[i + 2] ^ data[i + 3];
-				data[i] ^= e ^ math::fast_mult256(2, a ^ data[i + 1]);
-				data[i+1] ^= e ^ math::fast_mult256(2, data[i+1] ^ data[i + 2]);
-				data[i+2] ^= e ^ math::fast_mult256(2, data[i+2] ^ data[i + 3]);
-				data[i+3] ^= e ^ math::fast_mult256(2, data[i + 3] ^ a );
-			}
-		}
-
-		constexpr void mix_columns_imp2(byte_view<16> data) noexcept
-		{
-			for (size_t i = 0; i < 16; i = i + 4) {
-				uint8_t a = data[i];
-				uint8_t e = data[i] ^ data[i + 1] ^ data[i + 2] ^ data[i + 3];
-				data[i] ^= e ^ aes_base::MULT_TABLES.mult_2[a ^ data[i + 1]]; //math::fast_mult256(2, a ^ data[i + 1]);
-				data[i + 1] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 1] ^ data[i + 2]]; // math::fast_mult256(2, data[i + 1] ^ data[i + 2]);
-				data[i + 2] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 2] ^ data[i + 3]]; // math::fast_mult256(2, data[i + 2] ^ data[i + 3]);
-				data[i + 3] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 3] ^ a]; // math::fast_mult256(2, data[i + 3] ^ a);
-			}
-		}
-
-
 		constexpr void mix_columns(byte_view<16> data) noexcept
+		{
+			for (size_t i = 0; i < 16; i = i + 4) {
+				uint8_t a = data[i];
+				uint8_t e = data[i] ^ data[i + 1] ^ data[i + 2] ^ data[i + 3];
+				data[i] ^= e ^ aes_base::MULT_TABLES.mult_2[a ^ data[i + 1]]; 
+				data[i + 1] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 1] ^ data[i + 2]]; 
+				data[i + 2] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 2] ^ data[i + 3]]; 
+				data[i + 3] ^= e ^ aes_base::MULT_TABLES.mult_2[data[i + 3] ^ a]; 
+			}
+		}
+
+
+		constexpr void mix_columns_slow(byte_view<16> data) noexcept
 		{
 			// Todo: Improve this function
 			std::array<uint8_t, 16> buf{};
@@ -492,38 +472,6 @@ namespace krypto {
 		}
 
 		constexpr void shift_rows(byte_view<16> data) noexcept
-		{
-			// Todo: Improve this function 
-			std::array<uint8_t, 16> buf{};
-
-			// No shift
-			buf[0] = data[0];
-			buf[4] = data[4];
-			buf[8] = data[8];
-			buf[12] = data[12];
-
-			// cyclically shifts 1
-			buf[1] = data[5];
-			buf[5] = data[9];
-			buf[9] = data[13];
-			buf[13] = data[1];
-
-			// cyclically shifts 2
-			buf[2] = data[10];
-			buf[6] = data[14];
-			buf[10] = data[2];
-			buf[14] = data[6];
-
-			// cyclically shifts 3
-			buf[3] = data[15];
-			buf[7] = data[3];
-			buf[11] = data[7];
-			buf[15] = data[11];
-
-			std::copy(buf.begin(), buf.end(), data.begin());
-		}
-
-		constexpr void shift_rows_imp(byte_view<16> data) noexcept
 		{
 			
 			uint8_t i, j, k, l;
